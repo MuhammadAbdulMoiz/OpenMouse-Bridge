@@ -7,12 +7,6 @@ use serde::{Deserialize, Serialize};
 const DEFAULT_BATTERY_THRESHOLD: u8 = 20;
 const DEFAULT_ALERT_COOLDOWN_MINUTES: u64 = 360;
 const DEFAULT_NOTIFICATION_VOLUME: u8 = 60;
-const OFFICIAL_ORIGINS: &[&str] = &[
-    "https://control.openmouse.app",
-    "https://dev.openmouse.app",
-    "https://openmouse.app",
-    "https://www.openmouse.app",
-];
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -257,10 +251,11 @@ impl BridgeConfig {
                 self.default_profile = None;
             }
         }
-        for origin in OFFICIAL_ORIGINS {
-            if !self.allowed_origins.iter().any(|entry| entry == origin) {
-                self.allowed_origins.push((*origin).to_owned());
-            }
+        // The configured list is authoritative, as the README describes; only an
+        // empty list falls back to the defaults so a blank config still works.
+        self.allowed_origins.retain(|origin| !origin.trim().is_empty());
+        if self.allowed_origins.is_empty() {
+            self.allowed_origins = default_origins();
         }
         self.allowed_origins.sort();
         self.allowed_origins.dedup();
@@ -627,6 +622,31 @@ mod tests {
         assert_eq!(valorant.executables, ["valorant-win64-shipping.exe"]);
         assert!(
             config
+                .allowed_origins
+                .iter()
+                .any(|origin| origin == "https://control.openmouse.app")
+        );
+    }
+
+    #[test]
+    fn configured_origins_are_authoritative_and_only_an_empty_list_gets_defaults() {
+        let local_only: BridgeConfig = serde_json::from_str(
+            r#"{"allowedOrigins":["http://localhost:5173","http://127.0.0.1:5173"]}"#,
+        )
+        .expect("config should parse");
+        assert_eq!(
+            local_only.normalized().allowed_origins,
+            ["http://127.0.0.1:5173", "http://localhost:5173"]
+        );
+
+        let blank: BridgeConfig =
+            serde_json::from_str(r#"{"allowedOrigins":["  "]}"#).expect("config should parse");
+        assert_eq!(blank.normalized().allowed_origins.len(), default_origins().len());
+
+        let missing: BridgeConfig = serde_json::from_str("{}").expect("config should parse");
+        assert!(
+            missing
+                .normalized()
                 .allowed_origins
                 .iter()
                 .any(|origin| origin == "https://control.openmouse.app")
